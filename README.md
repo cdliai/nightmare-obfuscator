@@ -30,16 +30,13 @@ Designed for protecting intellectual property when sharing code with third parti
 - **Time-Locked Decryption** - Vaults unlock only after specified time
 - **Self-Destruct** - Auto-corrupt after failed attempts
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
-# Build the project
 cargo build --release
 
-# Set your master key
 export NIGHTMARE_KEY=$(openssl rand -hex 32)
 
-# Obfuscate your codebase
 ./target/release/nightmare obfuscate ./my-project --output ./obfuscated
 
 # Create a vault for third-party access
@@ -54,7 +51,7 @@ export NIGHTMARE_KEY=$(openssl rand -hex 32)
     --output ./unlocked
 ```
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 nightmare/
@@ -68,19 +65,19 @@ nightmare/
     └── main.rs        # CLI interface
 ```
 
-## 🛡️ Security Model
+## Security Model
 
 1. **Owner Access** - Full decryption with `NIGHTMARE_KEY` (AES-256-GCM)
 2. **Vault Access** - Third parties use BIP39 seed phrases (ChaCha20-Poly1305)
 3. **Time Locks** - Vaults can be time-locked using blockchain oracles
 4. **Self-Destruct** - Failed attempts decrement counter, 0 = permanent lock
 
-## ⚠️ Warnings
+## Warnings
 
 - **IRREVERSIBLE**: Without master key, obfuscation cannot be undone
 - **SEED PHRASES**: Write them down offline - lost = permanent vault lock
 - **TEST FIRST**: Always test obfuscation on copies
 
-## 📜 License
+## License
 
 MIT - Use at your own risk. Not responsible for lost code or keys.
