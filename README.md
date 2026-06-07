@@ -1,5 +1,7 @@
 # Nightmare Obfuscator
 
+<img width="1254" height="1254" alt="nightmare-obfs" src="https://github.com/user-attachments/assets/63269c0d-793b-4092-aab3-0842712b77a8" />
+
 Nightmare Obfuscator is a defensive IP-protection tool for controlled collaboration.
 It creates a working obfuscated copy of a Rust project while the owner keeps the
 original source. Each output includes a locked metadata vault with checksums,
