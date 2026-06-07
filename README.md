@@ -1,83 +1,93 @@
 # Nightmare Obfuscator
 
-> Make code unreadable. Make it yours.
+Nightmare Obfuscator is a defensive IP-protection tool for controlled collaboration.
+It creates a working obfuscated copy of a Rust project while the owner keeps the
+original source. Each output includes a locked metadata vault with checksums,
+configuration metadata, owner/project metadata, and an integrity signature.
 
-A high-intensity code obfuscation engine that transforms
-your readable codebase into cryptographic nightmare fuel.
-Designed for protecting intellectual property when sharing code with third parties.
+V1 is intentionally narrow:
 
+- Rust source support only.
+- One-way obfuscation; the original repo remains the source of truth.
+- No runtime key requirement for collaborators.
+- No deobfuscation or encrypted original-source recovery promise.
+- String encryption is disabled until it can preserve builds reliably.
 
----
-
-> Quick Acknowledgement
->
-> I acknowledge that some users might use the package to hide
-> obfuscated malicious code snippes in public repositories.
-> The purpose of this codebase is privacy and self-ownership
-> of certain IPs to be safely shareable with third parties.
-> I will not take any responsibility of how one use this packages.
-
-
-## Features
-
-- **Polymorphic Symbol Mangling** - Each file gets unique unreadable identifiers
-- **Dead Code Injection** - Zombie functions that look real but do nothing
-- **String Encryption** - Hide all string literals with XOR + base64
-- **Control Flow Flattening** - Destroy readable control structures
-- **Opaque Predicates** - Always-true conditions that confuse analysis
-- **Owner Encryption** - AES-256-GCM recovery with master key
-- **Seed Phrase Vaults** - BIP39 8-12 word access for third parties
-- **Time-Locked Decryption** - Vaults unlock only after specified time
-- **Self-Destruct** - Auto-corrupt after failed attempts
-
-## Quick Start
+## Install
 
 ```bash
 cargo build --release
-
-export NIGHTMARE_KEY=$(openssl rand -hex 32)
-
-./target/release/nightmare obfuscate ./my-project --output ./obfuscated
-
-# Create a vault for third-party access
-./target/release/nightmare vault create ./secret-module.rs \
-    --words 12 \
-    --output ./secret.vault \
-    --description "Core algorithm"
-
-# Third party opens vault with seed phrase
-./target/release/nightmare vault open ./secret.vault \
-    --seed "abandon abandon ..." \
-    --output ./unlocked
 ```
 
-## Architecture
+## Usage
 
-```
-nightmare/
-├── crates/
-│   ├── core/          # Types, configs, errors
-│   ├── crypto/        # AES-256-GCM, ChaCha20, Scrypt, BIP39
-│   ├── obfuscator/    # Symbol mangler, dead code, control flow
-│   ├── vault/         # Seed phrase access, timelocks
-│   └── parser/        # Multi-language source parsing
-└── src/
-    └── main.rs        # CLI interface
+Obfuscate a project into a sibling `<name>-obfs` directory:
+
+```bash
+nightmare obfuscate ./my-rust-project
 ```
 
-## Security Model
+Copy the full project but obfuscate only selected paths:
 
-1. **Owner Access** - Full decryption with `NIGHTMARE_KEY` (AES-256-GCM)
-2. **Vault Access** - Third parties use BIP39 seed phrases (ChaCha20-Poly1305)
-3. **Time Locks** - Vaults can be time-locked using blockchain oracles
-4. **Self-Destruct** - Failed attempts decrement counter, 0 = permanent lock
+```bash
+nightmare obfuscate ./my-rust-project --select src/critical
+```
 
-## Warnings
+Choose an explicit output directory and ignore additional paths:
 
-- **IRREVERSIBLE**: Without master key, obfuscation cannot be undone
-- **SEED PHRASES**: Write them down offline - lost = permanent vault lock
-- **TEST FIRST**: Always test obfuscation on copies
+```bash
+nightmare obfuscate ./my-rust-project \
+  --output ./partner-drop \
+  --select src/core.rs \
+  --ignore snapshots
+```
+
+Verify an obfuscated output:
+
+```bash
+nightmare verify ./my-rust-project-obfs
+```
+
+Inspect the metadata vault:
+
+```bash
+nightmare vault ./my-rust-project-obfs
+```
+
+## Behavior
+
+By default, Nightmare copies the entire input project so build files, assets, and
+configuration remain present. If no `--select` values are provided, all supported
+Rust source files are obfuscated. If `--select` is provided, only matching files
+or directories are obfuscated and unselected files are copied byte-for-byte.
+
+The default ignore set excludes `.git`, `target`, dependency/vendor folders, and
+`.nightmare`. Additional `--ignore <pattern>` values are matched against relative
+paths.
+
+The output metadata lives at:
+
+```text
+.nightmare/manifest.json
+.nightmare/signature
+```
+
+## Development
+
+```bash
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+Fixture acceptance tests are under `fixtures/` and `tests/acceptance.rs`.
+
+## Governance
+
+`main` is the stable/release branch and `dev` is the active integration branch.
+CDLI.ai maintainers own repository governance through CODEOWNERS, security
+reporting, and review gates.
 
 ## License
 
-MIT - Use at your own risk. Not responsible for lost code or keys.
+Licensed under either MIT or Apache-2.0, at your option.
