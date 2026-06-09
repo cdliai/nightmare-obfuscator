@@ -3,8 +3,9 @@
 //! Defensive IP-protection tooling for controlled collaboration.
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use tracing::info;
 
@@ -16,21 +17,62 @@ mod commands;
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
     #[arg(short, long, global = true)]
     verbose: bool,
 }
 
 #[derive(Subcommand)]
 enum Commands {
+    Init {
+        #[arg(long, default_value = "nightmare.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        source: Option<PathBuf>,
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        owner: Option<String>,
+        #[arg(long)]
+        owner_contact: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(short, long)]
+        intensity: Option<u8>,
+        #[arg(long)]
+        select: Vec<PathBuf>,
+        #[arg(short = 'x', long)]
+        ignore: Vec<String>,
+        #[arg(long)]
+        no_build_check: bool,
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        instant: bool,
+        #[arg(long)]
+        run: bool,
+        #[arg(long)]
+        signing_key: Option<PathBuf>,
+    },
+
+    Run {
+        config: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     Obfuscate {
         input: PathBuf,
         #[arg(short, long)]
         output: Option<PathBuf>,
         #[arg(long)]
         select: Vec<PathBuf>,
-        #[arg(short, long, default_value = "7")]
-        intensity: u8,
+        #[arg(short, long)]
+        intensity: Option<u8>,
         #[arg(short, long)]
         config: Option<PathBuf>,
         #[arg(short = 'x', long)]
@@ -41,6 +83,8 @@ enum Commands {
         no_string_encrypt: bool,
         #[arg(long)]
         no_flatten: bool,
+        #[arg(long)]
+        signing_key: Option<PathBuf>,
     },
 
     Vault {
@@ -49,6 +93,45 @@ enum Commands {
 
     Verify {
         input: PathBuf,
+        #[arg(long)]
+        trusted_public_key: Option<String>,
+    },
+
+    Gate {
+        #[command(subcommand)]
+        command: GateCommands,
+    },
+
+    Signing {
+        #[command(subcommand)]
+        command: SigningCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum GateCommands {
+    Github {
+        #[arg(long)]
+        repo: String,
+        #[arg(long = "ref")]
+        git_ref: String,
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum SigningCommands {
+    PublicKey {
+        #[arg(long)]
+        signing_key: PathBuf,
+    },
+    SignManifest {
+        input: PathBuf,
+        #[arg(long)]
+        signing_key: PathBuf,
     },
 }
 
@@ -57,7 +140,10 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let filter = if cli.verbose { "debug" } else { "info" };
 
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
     info!(
         "{} {}",
         "Nightmare".red().bold(),
@@ -65,7 +151,50 @@ async fn main() -> Result<()> {
     );
 
     match cli.command {
-        Commands::Obfuscate {
+        Some(Commands::Init {
+            config,
+            source,
+            output,
+            owner,
+            owner_contact,
+            project,
+            profile,
+            intensity,
+            select,
+            ignore,
+            no_build_check,
+            yes,
+            json,
+            instant,
+            run,
+            signing_key,
+        }) => {
+            commands::init::run(commands::init::InitArgs {
+                config,
+                source,
+                output,
+                owner,
+                owner_contact,
+                project,
+                profile,
+                intensity,
+                select,
+                ignore,
+                no_build_check,
+                yes,
+                json,
+                instant,
+                run_after_write: run,
+                signing_key,
+            })
+            .await?;
+        }
+
+        Some(Commands::Run { config, json }) => {
+            commands::run::run(commands::run::RunArgs { config, json }).await?;
+        }
+
+        Some(Commands::Obfuscate {
             input,
             output,
             select,
@@ -75,7 +204,8 @@ async fn main() -> Result<()> {
             no_dead_code,
             no_string_encrypt,
             no_flatten,
-        } => {
+            signing_key,
+        }) => {
             commands::obfuscate::run(commands::obfuscate::ObfuscateArgs {
                 input,
                 output,
@@ -86,16 +216,75 @@ async fn main() -> Result<()> {
                 no_dead_code,
                 no_string_encrypt,
                 no_flatten,
+                signing_key,
             })
             .await?;
         }
 
-        Commands::Vault { input } => {
+        Some(Commands::Vault { input }) => {
             commands::vault::inspect(input).await?;
         }
 
-        Commands::Verify { input } => {
-            commands::verify::run(input).await?;
+        Some(Commands::Verify {
+            input,
+            trusted_public_key,
+        }) => {
+            commands::verify::run(input, trusted_public_key).await?;
+        }
+
+        Some(Commands::Gate { command }) => match command {
+            GateCommands::Github {
+                repo,
+                git_ref,
+                config,
+                json,
+            } => {
+                commands::gate::run(commands::gate::GateCommand::GitHub(
+                    commands::gate::GitHubGateArgs {
+                        repo,
+                        git_ref,
+                        config,
+                        json,
+                    },
+                ))
+                .await?;
+            }
+        },
+
+        Some(Commands::Signing { command }) => match command {
+            SigningCommands::PublicKey { signing_key } => {
+                commands::signing::public_key(signing_key).await?;
+            }
+            SigningCommands::SignManifest { input, signing_key } => {
+                commands::signing::sign_manifest(input, signing_key).await?;
+            }
+        },
+
+        None if std::io::stdout().is_terminal() => {
+            commands::init::run(commands::init::InitArgs {
+                config: PathBuf::from("nightmare.toml"),
+                source: None,
+                output: None,
+                owner: None,
+                owner_contact: None,
+                project: None,
+                profile: None,
+                intensity: None,
+                select: Vec::new(),
+                ignore: Vec::new(),
+                no_build_check: false,
+                yes: false,
+                json: false,
+                instant: false,
+                run_after_write: false,
+                signing_key: None,
+            })
+            .await?;
+        }
+
+        None => {
+            Cli::command().print_help()?;
+            println!();
         }
     }
 

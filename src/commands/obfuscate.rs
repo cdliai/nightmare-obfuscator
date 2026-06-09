@@ -3,8 +3,9 @@ use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use nightmare_core::{
     FileEntry, Language, ManifestOwner, ManifestProject, NightmareManifest, ObfuscationConfig,
-    SessionId, SourceFile,
+    RunConfig, SessionId, SourceFile,
 };
+use nightmare_crypto::signing::ManifestSigner;
 use nightmare_obfuscator::ObfuscationEngine;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -14,29 +15,94 @@ pub struct ObfuscateArgs {
     pub input: PathBuf,
     pub output: Option<PathBuf>,
     pub select: Vec<PathBuf>,
-    pub intensity: u8,
+    pub intensity: Option<u8>,
     pub config: Option<PathBuf>,
     pub ignore: Vec<String>,
     pub no_dead_code: bool,
     pub no_string_encrypt: bool,
     pub no_flatten: bool,
+    pub signing_key: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ObfuscationSummary {
+    pub manifest_path: PathBuf,
 }
 
 pub async fn run(args: ObfuscateArgs) -> Result<()> {
+    let config = resolve_run_config(&args)?;
+    execute_contract(&config, true).await?;
+    Ok(())
+}
+
+pub fn resolve_run_config(args: &ObfuscateArgs) -> Result<RunConfig> {
     dotenvy::dotenv().ok();
 
-    if args.config.is_some() {
-        println!(
-            "{} --config is reserved for a future config-file schema and was ignored",
-            "warning:".yellow()
-        );
+    let mut config = if let Some(config_path) = &args.config {
+        let mut loaded = RunConfig::from_toml_file(config_path)?;
+        if let Some(base) = config_path.parent() {
+            loaded.resolve_relative_paths(base);
+        }
+        loaded.source = args.input.clone();
+        loaded
+    } else {
+        let output = args
+            .output
+            .clone()
+            .unwrap_or_else(|| default_output_path(&args.input));
+        let project_name = args
+            .input
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("project")
+            .to_string();
+        RunConfig::template(
+            args.input.clone(),
+            output,
+            std::env::var("NIGHTMARE_OWNER").unwrap_or_else(|_| "unclaimed".to_string()),
+            std::env::var("NIGHTMARE_PROJECT").unwrap_or(project_name),
+        )
+    };
+
+    if let Some(output) = &args.output {
+        config.output = output.clone();
+    }
+    if !args.select.is_empty() {
+        config.selected_paths = args.select.clone();
+    }
+    config.ignored_patterns.extend(args.ignore.clone());
+    if let Some(intensity) = args.intensity {
+        config.intensity = intensity.clamp(1, 10);
+    }
+    if args.no_dead_code {
+        config.features.dead_code = false;
+    }
+    if args.no_flatten {
+        config.features.flatten_control_flow = false;
+    }
+    if args.no_string_encrypt {
+        config.features.encrypt_strings = false;
+    }
+    if let Some(signing_key) = &args.signing_key {
+        config.signing.private_key_path = Some(signing_key.clone());
+    } else if config.signing.private_key_path.is_none() {
+        config.signing.private_key_path = std::env::var("NIGHTMARE_SIGNING_KEY_PATH")
+            .ok()
+            .map(PathBuf::from);
     }
 
-    let input = args
-        .input
+    config.validate()?;
+    Ok(config)
+}
+
+pub async fn execute_contract(config: &RunConfig, emit_human: bool) -> Result<ObfuscationSummary> {
+    config.validate()?;
+
+    let input = config
+        .source
         .canonicalize()
-        .with_context(|| format!("input path does not exist: {}", args.input.display()))?;
-    let output = args.output.unwrap_or_else(|| default_output_path(&input));
+        .with_context(|| format!("input path does not exist: {}", config.source.display()))?;
+    let output = config.output.clone();
 
     if output.exists()
         && output
@@ -50,45 +116,45 @@ pub async fn run(args: ObfuscateArgs) -> Result<()> {
         );
     }
 
-    let config = ObfuscationConfig {
-        intensity: args.intensity.clamp(1, 10),
-        dead_code: !args.no_dead_code,
-        encrypt_strings: false,
-        flatten_control_flow: !args.no_flatten,
+    let obfuscation_config = ObfuscationConfig {
+        intensity: config.intensity.clamp(1, 10),
+        dead_code: config.features.dead_code,
+        encrypt_strings: config.features.encrypt_strings,
+        flatten_control_flow: config.features.flatten_control_flow,
         opaque_predicates: false,
+        rename_identifiers: config.features.rename_identifiers,
         ..ObfuscationConfig::default()
     };
-
-    if !args.no_string_encrypt {
-        println!(
-            "{} string encryption is disabled in v1 to preserve builds",
-            "warning:".yellow()
-        );
-    }
 
     std::fs::create_dir_all(&output)?;
 
     let defaults = default_ignores();
     let ignore_patterns = defaults
         .iter()
-        .chain(args.ignore.iter())
+        .chain(config.ignored_patterns.iter())
         .cloned()
         .collect::<Vec<_>>();
-    let selected_paths = args
-        .select
+    let selected_paths = config
+        .selected_paths
         .iter()
         .map(|p| normalize_selected_path(&input, p))
         .collect::<Result<Vec<_>>>()?;
+    reject_non_rust_selected_files(&input, &selected_paths)?;
 
     let entries = collect_entries(&input, &ignore_patterns)?;
-    let pb = ProgressBar::new(entries.len() as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len} {msg}")?
-            .progress_chars("#>-"),
-    );
+    let pb = if emit_human {
+        let pb = ProgressBar::new(entries.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len} {msg}")?
+                .progress_chars("#>-"),
+        );
+        Some(pb)
+    } else {
+        None
+    };
 
-    let mut engine = ObfuscationEngine::new(config.clone());
+    let mut engine = ObfuscationEngine::new(obfuscation_config.clone());
     let mut files = Vec::new();
     let input_is_file = input.is_file();
 
@@ -104,7 +170,9 @@ pub async fn run(args: ObfuscateArgs) -> Result<()> {
         }
 
         let output_path = output.join(&rel);
-        pb.set_message(rel.display().to_string());
+        if let Some(pb) = &pb {
+            pb.set_message(rel.display().to_string());
+        }
 
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -138,81 +206,85 @@ pub async fn run(args: ObfuscateArgs) -> Result<()> {
             obfuscated: should_obfuscate,
         });
 
-        pb.inc(1);
+        if let Some(pb) = &pb {
+            pb.inc(1);
+        }
     }
 
-    pb.finish_with_message("copy complete");
+    if let Some(pb) = &pb {
+        pb.finish_with_message("copy complete");
+    }
     files.sort_by(|a, b| a.path.cmp(&b.path));
 
     let session_id = SessionId::new();
-    let project_name = input
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("project")
-        .to_string();
-    let signature_public_key = checksum_bytes(session_id.0.to_string().as_bytes());
+    let signer = signer_for_config(config)?;
+    let signature_public_key = signer.public_key_base64();
     let manifest = NightmareManifest {
         session_id,
         created_at: chrono::Utc::now(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         owner: ManifestOwner {
-            name: std::env::var("NIGHTMARE_OWNER").unwrap_or_else(|_| "unclaimed".to_string()),
-            contact: std::env::var("NIGHTMARE_OWNER_CONTACT").ok(),
+            name: config.owner.name.clone(),
+            contact: config.owner.contact.clone(),
         },
         project: ManifestProject {
-            name: std::env::var("NIGHTMARE_PROJECT").unwrap_or(project_name),
+            name: config.project.name.clone(),
             source_root: input.clone(),
         },
         selected_paths: selected_paths.clone(),
         ignored_patterns: ignore_patterns,
         files,
-        obfuscation_hash: checksum_bytes(&serde_json::to_vec(&config)?),
+        obfuscation_hash: checksum_bytes(&serde_json::to_vec(&obfuscation_config)?),
         signature_public_key,
     };
 
     let vault_dir = output.join(".nightmare");
     std::fs::create_dir_all(&vault_dir)?;
     let manifest_json = serde_json::to_vec_pretty(&manifest)?;
-    let signature = sign_manifest(&manifest.signature_public_key, &manifest_json);
+    let signature = signer.sign_manifest(&manifest_json);
     std::fs::write(vault_dir.join("manifest.json"), manifest_json)?;
     std::fs::write(vault_dir.join("signature"), signature)?;
 
     let obfuscated_count = manifest.files.iter().filter(|f| f.obfuscated).count();
-    println!("\n{}", "Obfuscation Summary".bold().underline());
-    println!(
-        "  {} Output: {}",
-        "->".dimmed(),
-        output.display().to_string().cyan()
-    );
-    println!(
-        "  {} Files copied: {}",
-        "->".dimmed(),
-        manifest.files.len().to_string().green()
-    );
-    println!(
-        "  {} Rust files obfuscated: {}",
-        "->".dimmed(),
-        obfuscated_count.to_string().green()
-    );
-    println!(
-        "  {} Manifest: {}",
-        "->".dimmed(),
-        output
-            .join(".nightmare/manifest.json")
-            .display()
-            .to_string()
-            .cyan()
-    );
+    if emit_human {
+        println!("\n{}", "Obfuscation Summary".bold().underline());
+        println!(
+            "  {} Output: {}",
+            "->".dimmed(),
+            output.display().to_string().cyan()
+        );
+        println!(
+            "  {} Files copied: {}",
+            "->".dimmed(),
+            manifest.files.len().to_string().green()
+        );
+        println!(
+            "  {} Rust files obfuscated: {}",
+            "->".dimmed(),
+            obfuscated_count.to_string().green()
+        );
+        println!(
+            "  {} Manifest: {}",
+            "->".dimmed(),
+            output
+                .join(".nightmare/manifest.json")
+                .display()
+                .to_string()
+                .cyan()
+        );
+    }
 
-    Ok(())
+    Ok(ObfuscationSummary {
+        manifest_path: output.join(".nightmare/manifest.json"),
+    })
 }
 
-pub fn sign_manifest(public_key: &str, manifest_json: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(b"nightmare-manifest-v1");
-    hasher.update(public_key.as_bytes());
-    hasher.update(manifest_json);
-    format!("{:x}", hasher.finalize())
+fn signer_for_config(config: &RunConfig) -> Result<ManifestSigner> {
+    if let Some(path) = &config.signing.private_key_path {
+        return Ok(ManifestSigner::from_seed_file(path)?);
+    }
+
+    Ok(ManifestSigner::ephemeral(nightmare_crypto::generate_salt()))
 }
 
 fn default_output_path(input: &Path) -> PathBuf {
@@ -299,7 +371,7 @@ fn normalize_selected_path(input: &Path, selected: &Path) -> Result<PathBuf> {
 }
 
 fn should_obfuscate_path(rel: &Path, language: Language, selected_paths: &[PathBuf]) -> bool {
-    if language != Language::Rust {
+    if !language.is_v1_obfuscation_supported() {
         return false;
     }
 
@@ -311,9 +383,36 @@ fn should_obfuscate_path(rel: &Path, language: Language, selected_paths: &[PathB
 
 fn language_for_path(path: &Path) -> Language {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    Language::from_extension(ext)
+    let detected = Language::from_extension(ext);
+    if detected.is_v1_obfuscation_supported() {
+        detected
+    } else {
+        Language::Unknown
+    }
 }
 
 fn checksum_bytes(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+fn reject_non_rust_selected_files(input: &Path, selected_paths: &[PathBuf]) -> Result<()> {
+    for selected in selected_paths {
+        let selected_path = input.join(selected);
+        if !selected_path.is_file() {
+            continue;
+        }
+        let detected = Language::from_extension(
+            selected_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or(""),
+        );
+        if !detected.is_v1_obfuscation_supported() {
+            anyhow::bail!(
+                "Rust-only V1 cannot obfuscate selected non-Rust file: {}",
+                selected.display()
+            );
+        }
+    }
+    Ok(())
 }

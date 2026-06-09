@@ -1,4 +1,7 @@
-//! Multi-language parser using tree-sitter
+//! Source file detector for Nightmare.
+//!
+//! V1 obfuscation support is Rust-only. Non-Rust extensions are detected only
+//! for roadmap visibility and should not be treated as supported transforms.
 
 use nightmare_core::{Language, NightmareError, Result, SourceFile};
 use sha2::{Digest, Sha256};

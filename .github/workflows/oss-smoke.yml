@@ -1,0 +1,27 @@
+name: OSS Smoke Matrix
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
+
+jobs:
+  smoke:
+    name: OSS smoke (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [hex, itoa, ripgrep, serde-json, bitflags]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: oss-smoke-${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}
+      - name: Run pinned smoke target
+        run: scripts/oss_smoke_matrix.sh --target "${{ matrix.target }}"

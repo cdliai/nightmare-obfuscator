@@ -39,7 +39,7 @@ impl ObfuscationEngine {
         // injecting undeclared runtime dependencies.
         if self.config.encrypt_strings {
             let encryptor = StringEncryptor::new(&self.session_seed);
-            content = encryptor.encrypt_strings(&content)?;
+            content = encryptor.encrypt_strings(&content, file.language)?;
         }
 
         if self.config.rename_identifiers {
