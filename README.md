@@ -63,13 +63,19 @@ Verify an obfuscated output:
 nightmare verify ./partner-drop
 ```
 
-Open the guided human flow when attached to a terminal:
+Open the CDLI.ai terminal shell when attached to a terminal:
 
 ```bash
 nightmare
-# or
-nightmare init
+# or render the entry screen without interaction
+nightmare tui --preview
 ```
+
+The shell starts with a CDLI-branded entry screen for Public Login and Account
+Login. Public Login opens the local obfuscation shell backed by the same
+`nightmare.toml` run contract. Account Login accepts an account name and
+password surface for the future hosted plan, but rejects locally until the
+backend is connected.
 
 Use `nightmare init --instant` for the reduced-motion terminal banner. Running
 `nightmare init --config ./nightmare.toml` against an existing config edits only

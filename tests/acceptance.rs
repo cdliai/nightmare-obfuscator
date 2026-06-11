@@ -197,6 +197,60 @@ fn selected_obfuscation_copies_unselected_files_byte_identical() {
 }
 
 #[test]
+fn default_ignores_skip_dot_git_without_dropping_dot_github() {
+    let root = temp_root("dot-github");
+    let input = root.join("rust-basic");
+    let output = root.join("dot-github-output");
+    copy_dir(&repo_root().join("fixtures/rust-basic"), &input);
+    fs::create_dir_all(input.join(".git")).unwrap();
+    fs::write(input.join(".git/config"), "private git metadata").unwrap();
+    fs::create_dir_all(input.join(".github/workflows")).unwrap();
+    fs::write(input.join(".github/CODEOWNERS"), "* @fbkaragoz").unwrap();
+    fs::write(input.join(".github/workflows/ci.yml"), "name: ci").unwrap();
+
+    run_ok(
+        Command::new(bin())
+            .arg("obfuscate")
+            .arg(&input)
+            .arg("--output")
+            .arg(&output),
+    );
+
+    assert!(!output.join(".git/config").exists());
+    assert!(output.join(".github/CODEOWNERS").exists());
+    assert!(output.join(".github/workflows/ci.yml").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn obfuscation_preserves_executable_permissions_for_scripts() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_root("permissions");
+    let input = root.join("rust-basic");
+    let output = root.join("permissions-output");
+    copy_dir(&repo_root().join("fixtures/rust-basic"), &input);
+    fs::create_dir_all(input.join("scripts")).unwrap();
+    let script = input.join("scripts/smoke.sh");
+    fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    run_ok(
+        Command::new(bin())
+            .arg("obfuscate")
+            .arg(&input)
+            .arg("--output")
+            .arg(&output),
+    );
+
+    let mode = fs::metadata(output.join("scripts/smoke.sh"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o111, 0o111);
+}
+
+#[test]
 fn string_encryption_is_opt_in_std_only_and_build_preserving() {
     let root = temp_root("string-encrypt");
     let input = root.join("rust-string-encrypt");
@@ -726,6 +780,39 @@ fn init_instant_uses_reduced_banner_and_non_tty_bare_command_prints_help() {
     let help = output_ok(&mut Command::new(bin()));
     let help_stdout = String::from_utf8_lossy(&help.stdout);
     assert!(help_stdout.contains("Usage:"));
+}
+
+#[test]
+fn tui_preview_renders_cdli_entry_screen() {
+    let preview = output_ok(Command::new(bin()).arg("tui").arg("--preview"));
+    let stdout = String::from_utf8_lossy(&preview.stdout);
+
+    assert!(stdout.contains("CDLI.ai"));
+    assert!(stdout.contains("cdli.ai"));
+    assert!(stdout.contains("Public Login"));
+    assert!(stdout.contains("Account Login"));
+    assert!(stdout.contains("Nightmare Obfuscator"));
+    assert!(stdout.contains("@@@@"));
+}
+
+#[test]
+fn tui_account_login_rejects_until_backend_is_connected() {
+    let login = output_fail(
+        Command::new(bin())
+            .arg("tui")
+            .arg("--account-name")
+            .arg("fatih")
+            .arg("--password")
+            .arg("secret"),
+    );
+    let stdout = String::from_utf8_lossy(&login.stdout);
+    let stderr = String::from_utf8_lossy(&login.stderr);
+
+    assert!(
+        stdout.contains("Account login is not connected yet")
+            || stderr.contains("Account login is not connected yet"),
+        "account login should reject with the planned not-connected message\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
 }
 
 #[test]

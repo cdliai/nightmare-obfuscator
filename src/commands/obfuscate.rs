@@ -198,6 +198,7 @@ pub async fn execute_contract(config: &RunConfig, emit_human: bool) -> Result<Ob
         };
 
         std::fs::write(&output_path, &after)?;
+        std::fs::set_permissions(&output_path, entry.metadata()?.permissions())?;
         files.push(FileEntry {
             path: rel,
             language,
@@ -342,11 +343,11 @@ fn is_ignored(entry: &DirEntry, root: &Path, ignore_patterns: &[String]) -> bool
         .path()
         .strip_prefix(root)
         .unwrap_or_else(|_| entry.path());
-    let rel_str = rel.to_string_lossy();
     ignore_patterns.iter().any(|pattern| {
         rel.components()
             .any(|c| c.as_os_str().to_string_lossy() == pattern.as_str())
-            || rel_str.contains(pattern)
+            || rel == Path::new(pattern)
+            || rel.starts_with(pattern)
     })
 }
 

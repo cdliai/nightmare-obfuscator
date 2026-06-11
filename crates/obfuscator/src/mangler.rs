@@ -36,7 +36,7 @@ impl<'a> SymbolMangler<'a> {
 
         let tokens = lex_rust(content);
         let candidates = collect_local_bindings(&tokens);
-        let safe_candidates = filter_unsafe_bindings(&tokens, candidates);
+        let safe_candidates = filter_unsafe_bindings(content, &tokens, candidates);
 
         for ident in safe_candidates {
             if self.mapping.contains_key(&ident) {
@@ -140,16 +140,7 @@ fn collect_local_bindings(tokens: &[Token]) -> HashSet<String> {
     while i < tokens.len() {
         if tokens[i].text == "let" {
             i += 1;
-            while i < tokens.len() && matches!(tokens[i].text.as_str(), "mut" | "ref") {
-                i += 1;
-            }
-
-            if i < tokens.len()
-                && tokens[i].kind == TokenKind::Ident
-                && is_mangleable_binding(&tokens[i].text)
-            {
-                bindings.insert(tokens[i].text.clone());
-            }
+            collect_pattern_bindings(tokens, &mut i, &mut bindings);
         }
 
         i += 1;
@@ -158,8 +149,49 @@ fn collect_local_bindings(tokens: &[Token]) -> HashSet<String> {
     bindings
 }
 
-fn filter_unsafe_bindings(tokens: &[Token], candidates: HashSet<String>) -> HashSet<String> {
+fn collect_pattern_bindings(tokens: &[Token], i: &mut usize, bindings: &mut HashSet<String>) {
+    let mut brace_depth = 0usize;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+
+    while *i < tokens.len() {
+        let token = &tokens[*i];
+        match token.text.as_str() {
+            "=" if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 => break,
+            "else" if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 => break,
+            "if" if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 => break,
+            "mut" | "ref" | "box" => {}
+            "{" => brace_depth += 1,
+            "}" => brace_depth = brace_depth.saturating_sub(1),
+            "(" => paren_depth += 1,
+            ")" => paren_depth = paren_depth.saturating_sub(1),
+            "[" => bracket_depth += 1,
+            "]" => bracket_depth = bracket_depth.saturating_sub(1),
+            _ if token.kind == TokenKind::Ident && is_mangleable_binding(&token.text) => {
+                let prev = previous_token(tokens, *i).map(|t| t.text.as_str());
+                let next = next_token(tokens, *i).map(|t| t.text.as_str());
+                if !is_pattern_constructor(&token.text, next)
+                    && !matches!(prev, Some(".") | Some("::") | Some("'"))
+                    && !matches!(next, Some(":") | Some("::"))
+                {
+                    bindings.insert(token.text.clone());
+                }
+            }
+            _ => {}
+        }
+
+        *i += 1;
+    }
+}
+
+fn filter_unsafe_bindings(
+    content: &str,
+    tokens: &[Token],
+    candidates: HashSet<String>,
+) -> HashSet<String> {
     let mut safe = candidates;
+
+    safe.retain(|candidate| !appears_as_format_placeholder(content, candidate));
 
     for (idx, token) in tokens.iter().enumerate() {
         if token.kind != TokenKind::Ident || !safe.contains(&token.text) {
@@ -169,14 +201,26 @@ fn filter_unsafe_bindings(tokens: &[Token], candidates: HashSet<String>) -> Hash
         let prev = previous_token(tokens, idx).map(|t| t.text.as_str());
         let next = next_token(tokens, idx).map(|t| t.text.as_str());
 
-        if matches!(prev, Some(".") | Some("::") | Some("'"))
+        if PRIMITIVE_TYPES.contains(&token.text.as_str())
+            || matches!(prev, Some(".") | Some("::") | Some("'"))
             || matches!(next, Some(":") | Some("::"))
+            || is_shorthand_field_context(prev, next)
         {
             safe.remove(&token.text);
         }
     }
 
     safe
+}
+
+fn appears_as_format_placeholder(content: &str, candidate: &str) -> bool {
+    let prefix = format!("{{{candidate}");
+    content.match_indices(&prefix).any(|(idx, _)| {
+        matches!(
+            content.as_bytes().get(idx + prefix.len()),
+            Some(b'}' | b':' | b'?')
+        )
+    })
 }
 
 fn previous_token(tokens: &[Token], idx: usize) -> Option<&Token> {
@@ -188,7 +232,26 @@ fn next_token(tokens: &[Token], idx: usize) -> Option<&Token> {
 }
 
 fn is_mangleable_binding(name: &str) -> bool {
-    name.len() > 2 && name != "_" && !name.starts_with('_') && !RUST_KEYWORDS.contains(&name)
+    name.len() > 2
+        && name != "_"
+        && !name.starts_with('_')
+        && starts_like_local_binding(name)
+        && !RUST_KEYWORDS.contains(&name)
+}
+
+fn starts_like_local_binding(name: &str) -> bool {
+    name.chars()
+        .next()
+        .map(|ch| ch.is_ascii_lowercase())
+        .unwrap_or(false)
+}
+
+fn is_pattern_constructor(name: &str, next: Option<&str>) -> bool {
+    matches!(next, Some("(") | Some("{")) && name.chars().next().is_some_and(char::is_uppercase)
+}
+
+fn is_shorthand_field_context(prev: Option<&str>, next: Option<&str>) -> bool {
+    matches!(prev, Some("{") | Some(",")) && matches!(next, Some(",") | Some("}"))
 }
 
 fn lex_rust(content: &str) -> Vec<Token> {
@@ -221,6 +284,11 @@ fn lex_rust(content: &str) -> Vec<Token> {
             continue;
         }
 
+        if let Some(next) = skip_raw_string(bytes, i) {
+            i = next;
+            continue;
+        }
+
         if b == b'"' {
             i = skip_quoted(bytes, i, b'"');
             continue;
@@ -232,6 +300,10 @@ fn lex_rust(content: &str) -> Vec<Token> {
             if i < bytes.len() && is_ident_start(bytes[i]) {
                 while i < bytes.len() && is_ident_continue(bytes[i]) {
                     i += 1;
+                }
+                if i < bytes.len() && bytes[i] == b'\'' {
+                    i = skip_quoted(bytes, start, b'\'');
+                    continue;
                 }
                 tokens.push(Token {
                     kind: TokenKind::Punct,
@@ -283,6 +355,44 @@ fn lex_rust(content: &str) -> Vec<Token> {
     tokens
 }
 
+fn skip_raw_string(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut i = start;
+    if bytes.get(i) == Some(&b'b') {
+        i += 1;
+    }
+    if bytes.get(i) != Some(&b'r') {
+        return None;
+    }
+    i += 1;
+
+    let mut hashes = 0usize;
+    while bytes.get(i) == Some(&b'#') {
+        hashes += 1;
+        i += 1;
+    }
+    if bytes.get(i) != Some(&b'"') {
+        return None;
+    }
+    i += 1;
+
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
+            let mut end = i + 1;
+            let mut matched = 0usize;
+            while matched < hashes && bytes.get(end) == Some(&b'#') {
+                matched += 1;
+                end += 1;
+            }
+            if matched == hashes {
+                return Some(end);
+            }
+        }
+        i += 1;
+    }
+
+    Some(bytes.len())
+}
+
 fn skip_quoted(bytes: &[u8], mut i: usize, quote: u8) -> usize {
     i += 1;
     while i < bytes.len() {
@@ -312,6 +422,11 @@ const RUST_KEYWORDS: &[&str] = &[
     "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where",
     "while", "async", "await", "dyn", "abstract", "become", "box", "do", "final", "macro",
     "override", "priv", "typeof", "unsized", "virtual", "yield", "try",
+];
+
+const PRIMITIVE_TYPES: &[&str] = &[
+    "bool", "char", "str", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64",
+    "u128", "usize", "f32", "f64",
 ];
 
 #[cfg(test)]
@@ -355,6 +470,95 @@ fn private(input: i32) -> i32 {
         assert!(output.contains("secret_value:"));
         assert!(output.contains(".secret_value"));
         assert!(!output.contains("let local_total"));
+        parse_rust(&output).unwrap();
+    }
+
+    #[test]
+    fn rust_mangling_preserves_enum_variant_patterns_and_constructors() {
+        let source = r#"
+fn option_status(value: Option<String>) -> Result<Option<String>, String> {
+    let Some(private_value) = value else {
+        return Ok(None);
+    };
+    if private_value.is_empty() {
+        return Err("empty".to_string());
+    }
+    Ok(Some(private_value))
+}
+"#;
+
+        let mut mangler = SymbolMangler::new(b"seed", Some("file.rs"));
+        let output = mangler.mangle_symbols(source, Language::Rust).unwrap();
+
+        assert!(output.contains("let Some("));
+        assert!(output.contains("Ok(None)"));
+        assert!(output.contains("Err("));
+        assert!(output.contains("Ok(Some("));
+        assert!(!output.contains("let private_value"));
+        parse_rust(&output).unwrap();
+    }
+
+    #[test]
+    fn rust_mangling_preserves_struct_shorthand_and_primitive_types() {
+        let source = r#"
+struct SourceFile {
+    path: String,
+    content: String,
+}
+
+fn build(path: String, content: String, byte: u8) -> SourceFile {
+    let mut buffer: u128 = 0;
+    let local_total = buffer + byte as u128;
+    buffer = local_total;
+    SourceFile {
+        path,
+        content,
+    }
+}
+"#;
+
+        let mut mangler = SymbolMangler::new(b"seed", Some("file.rs"));
+        let output = mangler.mangle_symbols(source, Language::Rust).unwrap();
+
+        assert!(output.contains("path,"));
+        assert!(output.contains("content,"));
+        assert!(output.contains("u128"));
+        assert!(!output.contains("let local_total"));
+        parse_rust(&output).unwrap();
+    }
+
+    #[test]
+    fn rust_mangling_skips_raw_strings_and_updates_all_local_uses() {
+        let source = r##"
+fn replacement(symbol: &str, encrypted: &str, key: u8) -> String {
+    let local_secret = "secret";
+    let result = format!(
+        r#"{{ static {symbol}: std::sync::OnceLock<String> = std::sync::OnceLock::new(); [{encrypted}] ^ {key} ^ {local_secret} }}"#
+    );
+    result
+}
+
+fn gibberish(hash: &[u8]) -> String {
+    let mut result = String::new();
+    for i in 0..16 {
+        let byte = hash[i % hash.len()];
+        let c = (b'a' + (byte % 26)) as char;
+        result.push(c);
+    }
+    result
+}
+"##;
+
+        let mut mangler = SymbolMangler::new(b"seed", Some("file.rs"));
+        let output = mangler.mangle_symbols(source, Language::Rust).unwrap();
+
+        assert!(output.contains("{symbol}"));
+        assert!(output.contains("{encrypted}"));
+        assert!(output.contains("{key}"));
+        assert!(output.contains("{local_secret}"));
+        assert!(output.contains("let local_secret"));
+        assert!(!output.contains("byte % 26"));
+        assert!(!output.contains("result.push"));
         parse_rust(&output).unwrap();
     }
 }

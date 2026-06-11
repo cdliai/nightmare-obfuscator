@@ -102,6 +102,15 @@ enum Commands {
         command: GateCommands,
     },
 
+    Tui {
+        #[arg(long)]
+        preview: bool,
+        #[arg(long)]
+        account_name: Option<String>,
+        #[arg(long)]
+        password: Option<String>,
+    },
+
     Signing {
         #[command(subcommand)]
         command: SigningCommands,
@@ -251,6 +260,19 @@ async fn main() -> Result<()> {
             }
         },
 
+        Some(Commands::Tui {
+            preview,
+            account_name,
+            password,
+        }) => {
+            commands::tui::run(commands::tui::TuiArgs {
+                preview,
+                account_name,
+                password,
+            })
+            .await?;
+        }
+
         Some(Commands::Signing { command }) => match command {
             SigningCommands::PublicKey { signing_key } => {
                 commands::signing::public_key(signing_key).await?;
@@ -261,23 +283,10 @@ async fn main() -> Result<()> {
         },
 
         None if std::io::stdout().is_terminal() => {
-            commands::init::run(commands::init::InitArgs {
-                config: PathBuf::from("nightmare.toml"),
-                source: None,
-                output: None,
-                owner: None,
-                owner_contact: None,
-                project: None,
-                profile: None,
-                intensity: None,
-                select: Vec::new(),
-                ignore: Vec::new(),
-                no_build_check: false,
-                yes: false,
-                json: false,
-                instant: false,
-                run_after_write: false,
-                signing_key: None,
+            commands::tui::run(commands::tui::TuiArgs {
+                preview: false,
+                account_name: None,
+                password: None,
             })
             .await?;
         }
