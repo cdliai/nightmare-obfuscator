@@ -2,10 +2,11 @@
 
 <img width="1254" height="1254" alt="nightmare-obfs" src="https://github.com/user-attachments/assets/63269c0d-793b-4092-aab3-0842712b77a8" />
 
-Nightmare Obfuscator is a defensive IP-protection tool for controlled collaboration.
-It creates a working obfuscated copy of a Rust project while the owner keeps the
-original source. Each output includes a locked metadata vault with checksums,
-configuration metadata, owner/project metadata, and an integrity signature.
+Nightmare Obfuscator is a defensive IP-protection tool for controlled collaboration,
+built and maintained by [CDLI.ai](https://cdli.ai). It creates a working obfuscated
+copy of a Rust project while the owner keeps the original source. Each output includes
+a locked metadata vault with checksums, configuration metadata, owner/project metadata,
+and an integrity signature.
 
 V1 is intentionally narrow:
 
@@ -147,6 +148,14 @@ cargo test --workspace
 ```
 
 Fixture acceptance tests are under `fixtures/` and `tests/acceptance.rs`.
+
+## For teams
+
+This open-source core covers protecting a single Rust drop locally. Rolling controlled
+source-sharing out across an organization — hosted accounts, policy and governance,
+coverage beyond Rust, and integration with the toolchains and agent harnesses you
+already run — is what CDLI delivers on the commercial side. Independent of the
+languages and tools in your stack, reach us at [CDLI.ai](https://cdli.ai).
 
 ## Governance
 
