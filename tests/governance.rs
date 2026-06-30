@@ -36,6 +36,8 @@ fn branch_protection_policy_documents_main_and_dev_rules() {
 fn codeowners_uses_valid_repository_owner() {
     let codeowners = fs::read_to_string(repo_root().join(".github/CODEOWNERS")).unwrap();
 
-    assert!(codeowners.contains("@fbkaragoz"));
+    // Governance is owned by a real org team with write access, not a single
+    // person, so the public repo story is not person-dependent.
+    assert!(codeowners.contains("@cdliai/cdli-core-team"));
     assert!(!codeowners.contains("@CDLI-ai/maintainers"));
 }
