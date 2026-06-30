@@ -10,50 +10,103 @@ configuration metadata, owner/project metadata, and an integrity signature.
 V1 is intentionally narrow:
 
 - Rust source support only.
+- Python, JavaScript, TypeScript, Go, C, C++, and Java are roadmap-only.
 - One-way obfuscation; the original repo remains the source of truth.
 - No runtime key requirement for collaborators.
 - No deobfuscation or encrypted original-source recovery promise.
-- String encryption is disabled until it can preserve builds reliably.
+- String encryption is disabled by default and must be enabled explicitly after
+  fixture/build-parity checks.
 
 ## Install
 
+Install the latest `main` build from source:
+
 ```bash
+cargo install --git https://github.com/cdliai/nightmare-obfuscator
+```
+
+Or download a packaged binary and its `.sha256` from a tagged
+[GitHub Release](https://github.com/cdliai/nightmare-obfuscator/releases).
+
+For local development from a checkout:
+
+```bash
+cargo install --path .
+# or build a release binary without installing
 cargo build --release
 ```
 
 ## Usage
 
-Obfuscate a project into a sibling `<name>-obfs` directory:
+Create a reusable run contract:
 
 ```bash
-nightmare obfuscate ./my-rust-project
-```
-
-Copy the full project but obfuscate only selected paths:
-
-```bash
-nightmare obfuscate ./my-rust-project --select src/critical
-```
-
-Choose an explicit output directory and ignore additional paths:
-
-```bash
-nightmare obfuscate ./my-rust-project \
+nightmare init \
+  --source ./my-rust-project \
   --output ./partner-drop \
-  --select src/core.rs \
-  --ignore snapshots
+  --owner CDLI \
+  --project my-rust-project \
+  --yes
+```
+
+Run the contract and emit machine-readable stage results:
+
+```bash
+nightmare run ./nightmare.toml --json
 ```
 
 Verify an obfuscated output:
 
 ```bash
-nightmare verify ./my-rust-project-obfs
+nightmare verify ./partner-drop
 ```
 
-Inspect the metadata vault:
+Open the CDLI.ai terminal shell when attached to a terminal:
 
 ```bash
+nightmare
+# or render the entry screen without interaction
+nightmare tui --preview
+```
+
+The shell starts with a CDLI-branded entry screen for Public Login and Account
+Login. Public Login opens the local obfuscation shell backed by the same
+`nightmare.toml` run contract. Account Login accepts an account name and
+password surface for the future hosted plan, but rejects locally until the
+backend is connected.
+
+Use `nightmare init --instant` for the reduced-motion terminal banner. Running
+`nightmare init --config ./nightmare.toml` against an existing config edits only
+the values supplied by flags and keeps the rest of the run contract intact.
+Use `nightmare init --run` to save the config and immediately run obfuscation
+through the same staged contract.
+
+Use an owner-controlled Ed25519 signing seed when provenance identity matters:
+
+```bash
+nightmare signing public-key --signing-key ./nightmare-signing.key
+nightmare verify ./partner-drop --trusted-public-key <base64-public-key>
+```
+
+The signing key file contains a base64-encoded 32-byte seed. The manifest stores
+only the public verification key.
+
+Legacy scriptable commands remain supported:
+
+```bash
+nightmare obfuscate ./my-rust-project --select src/critical
 nightmare vault ./my-rust-project-obfs
+```
+
+Experimental agent planning is available as a thin surface over the same run
+contract:
+
+```bash
+nightmare gate github \
+  --repo https://github.com/owner/repo \
+  --ref <40-character-commit-sha> \
+  --config ./nightmare.toml \
+  --json
 ```
 
 ## Behavior
@@ -62,6 +115,17 @@ By default, Nightmare copies the entire input project so build files, assets, an
 configuration remain present. If no `--select` values are provided, all supported
 Rust source files are obfuscated. If `--select` is provided, only matching files
 or directories are obfuscated and unselected files are copied byte-for-byte.
+
+The canonical run contract is documented in
+[`docs/run-contract.md`](docs/run-contract.md). It wraps source/output paths,
+owner/project metadata, selected paths, ignores, profile/intensity, feature
+toggles, metadata verification, and build/smoke policy. `nightmare run --json`
+separates obfuscation, metadata verification, and build/smoke checks so CI and
+agents do not overclaim safety.
+
+Language policy is documented in
+[`docs/language-support.md`](docs/language-support.md). Non-Rust files are
+copied as opaque assets in V1.
 
 The default ignore set excludes `.git`, `target`, dependency/vendor folders, and
 `.nightmare`. Additional `--ignore <pattern>` values are matched against relative

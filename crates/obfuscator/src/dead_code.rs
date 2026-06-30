@@ -15,9 +15,10 @@ impl DeadCodeInjector {
     pub fn inject(&self, content: &str, lang: Language) -> Result<String> {
         let num_injections = (self.intensity / 2).max(1);
         let mut result = content.to_string();
+        let start_index = next_dead_code_index(content);
 
         for index in 0..num_injections {
-            let zombie = self.generate_zombie(lang, index);
+            let zombie = self.generate_zombie(lang, start_index + index);
             // Insert at random positions or at end
             result.push('\n');
             result.push_str(&zombie);
@@ -99,6 +100,47 @@ const _O0l1 = new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE]);
                 Ok(content.to_string())
             }
             _ => Ok(content.to_string()),
+        }
+    }
+}
+
+fn next_dead_code_index(content: &str) -> u8 {
+    let mut next = 0u8;
+    for line in content.lines() {
+        let Some(rest) = line.trim_start().strip_prefix("fn _nm_dead_") else {
+            continue;
+        };
+        let digits = rest
+            .chars()
+            .take_while(|ch| ch.is_ascii_digit())
+            .collect::<String>();
+        let Ok(index) = digits.parse::<u8>() else {
+            continue;
+        };
+        next = next.max(index.saturating_add(1));
+    }
+    next
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rust_dead_code_injection_uses_unique_names_on_repeated_passes() {
+        let injector = DeadCodeInjector::new(7);
+        let once = injector
+            .inject("pub fn answer() -> u64 { 42 }", Language::Rust)
+            .unwrap();
+        let twice = injector.inject(&once, Language::Rust).unwrap();
+
+        for index in 0..3 {
+            let function_name = format!("fn _nm_dead_{index}");
+            assert_eq!(
+                twice.matches(&function_name).count(),
+                1,
+                "{function_name} should not be injected twice"
+            );
         }
     }
 }

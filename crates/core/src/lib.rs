@@ -5,6 +5,9 @@ use std::path::PathBuf;
 use thiserror::Error;
 use uuid::Uuid;
 
+pub mod contract;
+pub use contract::*;
+
 pub type Result<T> = std::result::Result<T, NightmareError>;
 
 #[derive(Error, Debug)]
@@ -44,7 +47,10 @@ impl Default for SessionId {
     }
 }
 
-/// Supported programming languages
+/// Detected source language identifiers.
+///
+/// V1 obfuscation support is Rust-only. Other variants are roadmap identifiers
+/// used for detection and explicit non-support reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Language {
     Rust,
@@ -85,6 +91,10 @@ impl Language {
             Self::Java => "java",
             Self::Unknown => "unknown",
         }
+    }
+
+    pub fn is_v1_obfuscation_supported(&self) -> bool {
+        matches!(self, Self::Rust)
     }
 }
 

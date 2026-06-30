@@ -20,6 +20,7 @@ use sha2::Sha256;
 
 pub mod bip39;
 pub mod keys;
+pub mod signing;
 
 pub use keys::{KeyDerivation, MasterKey, VaultKey};
 
