@@ -28,7 +28,7 @@ build = "cargo test"
 
 [features]
 dead_code = true
-flatten_control_flow = true
+flatten_control_flow = false
 encrypt_strings = false
 rename_identifiers = true
 
@@ -39,6 +39,11 @@ private_key_path = "./nightmare-signing.key"
 Supported profiles are `light`, `balanced`, and `aggressive`. `intensity` must
 be between 1 and 10. `encrypt_strings` is disabled by default and can be enabled
 only through explicit config.
+
+`flatten_control_flow` is experimental and **not yet implemented**. It is
+disabled by default; enabling it currently performs no transformation (a no-op)
+and prints a warning, so a run never reports control-flow flattening that did not
+happen. The toggle is retained for roadmap compatibility.
 
 ## Precedence
 

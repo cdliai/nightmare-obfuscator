@@ -1,8 +1,16 @@
-//! Control flow flattener - destroys readable control flow structure
+//! Control flow flattener (roadmap placeholder).
+//!
+//! This is an experimental, not-yet-implemented transform. Every method
+//! currently returns the input unchanged. It is intentionally kept behind the
+//! `flatten_control_flow` feature, which is disabled by default and emits a
+//! warning when enabled, so callers are never led to believe control flow was
+//! transformed. A real build-preserving implementation needs full AST rewriting
+//! into match-based state machines and is tracked as future work.
 
 use nightmare_core::{Language, Result};
 
 pub struct ControlFlowFlattener {
+    #[allow(dead_code)]
     intensity: u8,
 }
 
@@ -11,30 +19,8 @@ impl ControlFlowFlattener {
         Self { intensity }
     }
 
-    /// Flatten control flow structures into state machines
-    pub fn flatten(&self, content: &str, lang: Language) -> Result<String> {
-        if self.intensity < 5 {
-            return Ok(content.to_string());
-        }
-
-        // This is a simplified version - full implementation would need AST
-        let flattened = match lang {
-            Language::Rust => self.flatten_rust(content)?,
-            Language::C | Language::Cpp => self.flatten_c(content)?,
-            _ => content.to_string(),
-        };
-
-        Ok(flattened)
-    }
-
-    fn flatten_rust(&self, content: &str) -> Result<String> {
-        // Transform nested control flow into match-based state machines
-        // This is a placeholder - real implementation needs full AST parsing
-        Ok(content.to_string())
-    }
-
-    fn flatten_c(&self, content: &str) -> Result<String> {
-        // Transform into computed goto or switch-based state machine
+    /// Returns the input unchanged. Not yet implemented; see module docs.
+    pub fn flatten(&self, content: &str, _lang: Language) -> Result<String> {
         Ok(content.to_string())
     }
 }

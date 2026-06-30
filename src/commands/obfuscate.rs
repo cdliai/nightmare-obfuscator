@@ -116,6 +116,13 @@ pub async fn execute_contract(config: &RunConfig, emit_human: bool) -> Result<Ob
         );
     }
 
+    if config.features.flatten_control_flow {
+        eprintln!(
+            "warning: flatten_control_flow is experimental and not yet implemented; \
+             it is currently a no-op and does not transform control flow."
+        );
+    }
+
     let obfuscation_config = ObfuscationConfig {
         intensity: config.intensity.clamp(1, 10),
         dead_code: config.features.dead_code,

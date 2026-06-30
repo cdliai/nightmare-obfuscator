@@ -166,7 +166,10 @@ pub struct CheckConfig {
 pub struct FeatureConfig {
     #[serde(default = "default_true")]
     pub dead_code: bool,
-    #[serde(default = "default_true")]
+    /// Experimental and not yet implemented: currently a no-op that does not
+    /// transform control flow. Disabled by default to avoid implying a
+    /// protection that is not applied. See `docs/run-contract.md`.
+    #[serde(default)]
     pub flatten_control_flow: bool,
     #[serde(default)]
     pub encrypt_strings: bool,
@@ -185,7 +188,7 @@ impl Default for FeatureConfig {
     fn default() -> Self {
         Self {
             dead_code: true,
-            flatten_control_flow: true,
+            flatten_control_flow: false,
             encrypt_strings: false,
             rename_identifiers: true,
         }
@@ -345,4 +348,31 @@ fn summarize(value: String) -> String {
         summary.push_str("...");
     }
     summary
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flatten_control_flow_defaults_off() {
+        // flatten_control_flow is an unimplemented no-op; it must stay disabled
+        // by default and when omitted from the contract so a run never implies a
+        // control-flow transform that did not happen.
+        assert!(!FeatureConfig::default().flatten_control_flow);
+
+        let minimal = r#"
+schema_version = 1
+source = "./in"
+output = "./out"
+
+[owner]
+name = "CDLI"
+
+[project]
+name = "demo"
+"#;
+        let config: RunConfig = toml::from_str(minimal).expect("minimal contract parses");
+        assert!(!config.features.flatten_control_flow);
+    }
 }
