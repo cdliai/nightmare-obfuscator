@@ -108,8 +108,8 @@ fn logo_animation_frames() -> [&'static str; 3] {
 }
 
 pub fn cdli_logo_ascii() -> &'static str {
-    // ASCII reduction derived from /Users/fatih/Desktop/Design/logos/cdli/cdli-logo.svg.
-    // Keep this mark stable; it is the terminal companion to the CDLI source asset.
+    // ASCII reduction of the CDLI logo mark. Keep this stable; it is the
+    // terminal companion to the canonical CDLI brand asset.
     r#"@@@@@@@@@@@@@@@@@@@@#=::+%@@@@@@@@@@@@@@@@@@@@
 @@@@@@@@@@@@@@@@#=:.:=*+-..-+#@@@@@@@@@@@@@@@@
 @@@@@@@@@@@@@*=. .=#@@@#@%+=. :+%@@@@@@@@@@@@@
