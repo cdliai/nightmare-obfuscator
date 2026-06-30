@@ -19,23 +19,21 @@ V1 is intentionally narrow:
 
 ## Install
 
-Install from a local checkout during development:
-
-```bash
-cargo install --path .
-```
-
-Build a release binary locally:
-
-```bash
-cargo build --release
-```
-
-After release automation lands, the intended install paths are:
+Install the latest `main` build from source:
 
 ```bash
 cargo install --git https://github.com/cdliai/nightmare-obfuscator
-# or download a signed release binary from GitHub Releases
+```
+
+Or download a packaged binary and its `.sha256` from a tagged
+[GitHub Release](https://github.com/cdliai/nightmare-obfuscator/releases).
+
+For local development from a checkout:
+
+```bash
+cargo install --path .
+# or build a release binary without installing
+cargo build --release
 ```
 
 ## Usage
